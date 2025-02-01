@@ -1,8 +1,0 @@
-Flask
-fastapi
-uvicorn
-sqlite3
-PyQt5
-requests
-pydantic
-pytest
