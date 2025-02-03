@@ -224,7 +224,6 @@ async def get_inventory_items():
               of inventory items, where each item is represented as a
               dictionary with 'name' and 'quantity' keys.
     """
-    await asyncio.sleep(10)
     log_request("/inventory", {})
     items = get_inventory()
     return {

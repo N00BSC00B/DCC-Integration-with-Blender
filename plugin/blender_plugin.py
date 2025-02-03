@@ -2,10 +2,19 @@ import bpy
 import requests
 import threading
 
-# Define FastAPI server URL
+# FastAPI server URL
 SERVER_URL = "http://127.0.0.1:8000"
 
-# Available endpoints
+# Global variables for inventory plugin
+inventory_data = []
+_pending_data = None  # Temporary storage for fetched data
+
+# Global variables for transformation plugin
+server_response_message = ""
+current_selected_object = None
+last_known_transform = {"position": None, "rotation": None, "scale": None}
+
+# Available endpoints for transformation plugin
 ENDPOINTS = {
     "Full Transform": {
         "path": "/transform",
@@ -25,16 +34,62 @@ ENDPOINTS = {
     }
 }
 
-# Global variable to store server response for UI updates
-server_response_message = ""
 
-# Global variable to track the currently selected object
-current_selected_object = None
+# Inventory Plugin Classes
+class DCCInventoryPanel(bpy.types.Panel):
+    """Creates the Inventory Display Panel in the Sidebar"""
+    bl_label = "Inventory Display"
+    bl_idname = "VIEW3D_PT_dcc_inventory"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "DCC Plugin"
 
-# Global variable to track the last known transform of the selected object
-last_known_transform = {"position": None, "rotation": None, "scale": None}
+    def draw(self, context):
+        layout = self.layout
+
+        if not inventory_data:
+            layout.label(text="No inventory data available.")
+            return
+
+        # Display inventory data
+        for item in inventory_data:
+            row = layout.row()
+            row.label(text=f"{item['name']}: {item['quantity']}")
 
 
+def fetch_inventory():
+    """Fetches inventory data from the FastAPI server in a background thread"""
+    global _pending_data
+    try:
+        response = requests.get(f"{SERVER_URL}/get_inventory", timeout=15)
+        if response.status_code == 200:
+            _pending_data = response.json()["inventory"]
+        else:
+            print(f"Error fetching inventory: {response.text}")
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+def update_inventory_display():
+    """Checks for new data, updates inventory, and refreshes UI"""
+    global inventory_data, _pending_data
+
+    if _pending_data is not None:
+        inventory_data = _pending_data  # Update global data safely
+        _pending_data = None  # Reset pending data
+
+        # Ensure all 3D view areas are updated
+        for area in bpy.context.screen.areas:
+            if area.type == "VIEW_3D":
+                area.tag_redraw()
+
+        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+
+    threading.Thread(target=fetch_inventory, daemon=True).start()
+    return 10.0
+
+
+# Transformation Plugin Classes
 class DCCPluginProperties(bpy.types.PropertyGroup):
     """
     Defines custom properties for the Blender add-on UI, allowing users to
@@ -243,10 +298,14 @@ def update_plugin_properties_from_object(scene):
             props.scale = obj.scale
 
 
+# Registration and Unregistration
 def register():
-    """
-    Registers the add-on classes and properties with Blender.
-    """
+    """Registers all classes and properties with Blender."""
+    # Inventory Plugin
+    bpy.utils.register_class(DCCInventoryPanel)
+    bpy.app.timers.register(update_inventory_display, first_interval=1.0)
+
+    # Transformation Plugin
     bpy.utils.register_class(DCCPluginProperties)
     bpy.utils.register_class(DCCPluginPanel)
     bpy.utils.register_class(SendTransformOperator)
@@ -259,9 +318,12 @@ def register():
 
 
 def unregister():
-    """
-    Unregisters the add-on classes and properties from Blender.
-    """
+    """Unregisters all classes and properties from Blender."""
+    # Inventory Plugin
+    bpy.utils.unregister_class(DCCInventoryPanel)
+    bpy.app.timers.unregister(update_inventory_display)
+
+    # Transformation Plugin
     bpy.utils.unregister_class(DCCPluginProperties)
     bpy.utils.unregister_class(DCCPluginPanel)
     bpy.utils.unregister_class(SendTransformOperator)
