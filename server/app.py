@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
-from endpoints import router
-from database import create_tables
+from .endpoints import router
+from .database import create_tables
 
 # Initialize FastAPI app
 app = FastAPI()

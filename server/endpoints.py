@@ -2,7 +2,7 @@ import logging
 import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from database import add_item, remove_item, update_quantity, get_inventory
+from .database import add_item, remove_item, update_quantity, get_inventory
 
 # Initialize Router
 router = APIRouter()

@@ -2,9 +2,12 @@ import sys
 import requests
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
-    QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QMessageBox, QInputDialog
+    QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QMessageBox, QInputDialog,
+    QLineEdit, QMenu
 )
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
+from PyQt6.QtCore import (
+    QThread, pyqtSignal, Qt
+)
 
 # FastAPI server URL
 SERVER_URL = "http://127.0.0.1:8000"
@@ -82,34 +85,33 @@ class InventoryApp(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
 
+        # Search Bar
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Search...")
+        self.search_bar.textChanged.connect(self.filter_table)
+        self.layout.addWidget(self.search_bar)
+
         # Table
         self.table = QTableWidget()
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["Name", "Quantity"])
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                gridline-color: #444444;
-                font-size: 14px;
-            }
-            QHeaderView::section {
-                background-color: #1e1e1e;
-                color: #ffffff;
-                padding: 5px;
-                font-size: 16px;
-                border: none;
-            }
-            QTableWidget::item {
-                padding: 5px;
-            }
-            QTableWidget::item:selected {
-                background-color: #0078d7;
-                color: #ffffff;
-            }
-        """)
+        self.table.setSortingEnabled(True)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
         self.layout.addWidget(self.table)
+
+        # Pagination
+        self.current_page = 0
+        self.items_per_page = 10
+        self.pagination_layout = QHBoxLayout()
+        self.prev_button = QPushButton("Previous")
+        self.next_button = QPushButton("Next")
+        self.prev_button.clicked.connect(self.prev_page)
+        self.next_button.clicked.connect(self.next_page)
+        self.pagination_layout.addWidget(self.prev_button)
+        self.pagination_layout.addWidget(self.next_button)
+        self.layout.addLayout(self.pagination_layout)
 
         # Buttons Layout
         self.button_layout_top = QHBoxLayout()
@@ -117,80 +119,20 @@ class InventoryApp(QMainWindow):
 
         # Purchase and Return Buttons (Top Row)
         self.purchase_button = QPushButton("Purchase Item")
+        self.purchase_button.setObjectName("purchase_button")
         self.return_button = QPushButton("Return Item")
-
-        self.purchase_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-size: 14px;
-                padding: 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-
-        self.return_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-size: 14px;
-                padding: 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-        """)
+        self.return_button.setObjectName("return_button")
 
         self.button_layout_top.addWidget(self.purchase_button)
         self.button_layout_top.addWidget(self.return_button)
 
         # Add Item, Remove Item, and Update Quantity Buttons (Bottom Row)
         self.add_item_button = QPushButton("Add Item")
+        self.add_item_button.setObjectName("add_item_button")
         self.remove_item_button = QPushButton("Remove Item")
+        self.remove_item_button.setObjectName("remove_item_button")
         self.update_quantity_button = QPushButton("Update Quantity")
-
-        self.add_item_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                font-size: 14px;
-                padding: 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-        """)
-
-        self.remove_item_button.setStyleSheet("""
-            QPushButton {
-                background-color: #ff9800;
-                color: white;
-                font-size: 14px;
-                padding: 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #f57c00;
-            }
-        """)
-
-        self.update_quantity_button.setStyleSheet("""
-            QPushButton {
-                background-color: #9c27b0;
-                color: white;
-                font-size: 14px;
-                padding: 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #7b1fa2;
-            }
-        """)
+        self.update_quantity_button.setObjectName("update_quantity_button")
 
         self.button_layout_bottom.addWidget(self.add_item_button)
         self.button_layout_bottom.addWidget(self.remove_item_button)
@@ -218,8 +160,17 @@ class InventoryApp(QMainWindow):
         self.worker.start()
 
     def update_table(self, inventory):
-        self.table.setRowCount(len(inventory))
-        for row, item in enumerate(inventory):
+        self.full_inventory = inventory
+        self.inventory = inventory
+        self.display_page()
+
+    def display_page(self):
+        start = self.current_page * self.items_per_page
+        end = start + self.items_per_page
+        page_items = self.inventory[start:end]
+
+        self.table.setRowCount(len(page_items))
+        for row, item in enumerate(page_items):
             name_item = QTableWidgetItem(item["name"])
             name_item.setFlags(
                 name_item.flags() & ~Qt.ItemFlag.ItemIsEditable
@@ -231,6 +182,37 @@ class InventoryApp(QMainWindow):
                 quantity_item.flags() & ~Qt.ItemFlag.ItemIsEditable
             )
             self.table.setItem(row, 1, quantity_item)
+
+    def filter_table(self, text):
+        if not text:
+            self.inventory = self.full_inventory
+        else:
+            self.inventory = [
+                item for item in self.full_inventory
+                if text.lower() in item["name"].lower()
+            ]
+        self.current_page = 0
+        self.display_page()
+
+    def prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.display_page()
+
+    def next_page(self):
+        if (self.current_page + 1) * self.items_per_page < len(self.inventory):
+            self.current_page += 1
+            self.display_page()
+
+    def show_context_menu(self, position):
+        menu = QMenu()
+        remove_action = menu.addAction("Remove")
+        update_action = menu.addAction("Update Quantity")
+        action = menu.exec(self.table.viewport().mapToGlobal(position))
+        if action == remove_action:
+            self.handle_remove_item()
+        elif action == update_action:
+            self.handle_update_quantity()
 
     def handle_purchase(self):
         self.update_quantity(-1)
@@ -323,8 +305,74 @@ class InventoryApp(QMainWindow):
             self.load_inventory()
 
 
+qss = """QTableWidget {
+  background-color: #2d2d2d;
+  color: #ffffff;
+  gridline-color: #444444;
+  font-size: 14px;
+}
+QHeaderView::section {
+  background-color: #1e1e1e;
+  color: #ffffff;
+  padding: 5px;
+  font-size: 16px;
+  border: none;
+}
+QTableWidget::item {
+  padding: 5px;
+}
+QTableWidget::item:selected {
+  background-color: #0078d7;
+  color: #ffffff;
+}
+QPushButton {
+  background-color: #33a1ea;
+  color: white;
+  font-size: 14px;
+  padding: 10px;
+  border-radius: 5px;
+}
+QPushButton:hover {
+  background-color: #1b71aa;
+}
+QPushButton#purchase_button {
+  background-color: #4caf50;
+}
+QPushButton#purchase_button:hover {
+  background-color: #45a049;
+}
+QPushButton#return_button {
+  background-color: #f44336;
+}
+QPushButton#return_button:hover {
+  background-color: #d32f2f;
+}
+QPushButton#add_item_button {
+  background-color: #2196f3;
+}
+QPushButton#add_item_button:hover {
+  background-color: #1976d2;
+}
+QPushButton#remove_item_button {
+  background-color: #ff9800;
+}
+QPushButton#remove_item_button:hover {
+  background-color: #f57c00;
+}
+QPushButton#update_quantity_button {
+  background-color: #9c27b0;
+}
+QPushButton#update_quantity_button:hover {
+  background-color: #7b1fa2;
+}
+"""
+
+
+app = QApplication(sys.argv)
+window = InventoryApp()
+app.setStyleSheet(qss)
+
+
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = InventoryApp()
     window.show()
     sys.exit(app.exec())
