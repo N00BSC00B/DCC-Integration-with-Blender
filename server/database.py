@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine, Column, Integer, String
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import sessionmaker, scoped_session, declarative_base
 from sqlalchemy.exc import SQLAlchemyError
 from contextlib import contextmanager
 
